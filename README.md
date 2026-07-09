@@ -1,39 +1,38 @@
 # Dashboard Operativa Futuros — Pionex
 
-Pipeline automático: modificas el Excel, lo subes al repo y GitHub Actions regenera y publica el dashboard HTML. Sin pasos manuales intermedios.
+Pipeline automático: exportas los CSV de Pionex, los arrastras al repo y GitHub Actions analiza toda la operativa (promedios, liquidaciones, fees, funding) y regenera el dashboard y el Excel. No hay que editar ningún Excel a mano.
 
 ## Estructura
 
 ```
-data/operativa-futuros-pionex.xlsx   ← el único archivo que tocas
-scripts/build_dashboard.py           ← lee el Excel y genera el HTML
-templates/dashboard.template.html    ← plantilla con el sistema visual Descentralizados
-.github/workflows/deploy.yml         ← build + deploy a GitHub Pages en cada push
-dist/index.html                      ← salida (la genera el pipeline, no se versiona)
+data/position_futures.csv        ← export de Pionex (posiciones cerradas)
+data/raw-trading-details.csv     ← export de Pionex (fills)
+data/others.csv                  ← export de Pionex (funding, RiskCoverage)
+data/operaciones-manuales.csv    ← operaciones aún no incluidas en el export (opcional)
+scripts/build_dashboard.py       ← análisis completo + generación de salidas
+templates/dashboard.template.html
+.github/workflows/deploy.yml     ← build + deploy a GitHub Pages en cada push
+dist/                            ← salida del pipeline (no se versiona)
 ```
 
-## Puesta en marcha (una sola vez, ~3 minutos)
+## Flujo de trabajo
 
-1. Crea un repo en GitHub (recomendado **privado** — ver nota de privacidad abajo) y sube todo el contenido de esta carpeta.
-2. En el repo: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
-3. Haz cualquier push a `main` (o lanza el workflow desde **Actions → Actualizar dashboard → Run workflow**).
-4. En 1-2 minutos el dashboard queda publicado en `https://<usuario>.github.io/<repo>/`.
+1. En Pionex: exporta el histórico (los mismos CSV de siempre).
+2. En github.com, entra en la carpeta `data/` → **Add file → Upload files** → arrastra `position_futures.csv`, `raw-trading-details.csv` y `others.csv` (mismos nombres, se sobrescriben) → **Commit changes**.
+3. En ~1-2 minutos el dashboard está actualizado en GitHub Pages, con el Excel de reporte descargable desde el propio dashboard (botón "Descargar Excel").
 
-## Flujo de trabajo diario
+El script hace en cada build el análisis completo: asigna los fills a cada posición, cuenta los promedios, detecta liquidaciones vía RiskCoverage, separa bots de operaciones manuales y calcula rentabilidad sobre capital desplegado.
 
-1. Edita `data/operativa-futuros-pionex.xlsx` (hoja **Operaciones**): añade filas, corrige datos, etc.
-2. Súbelo al repo. Dos opciones:
-   - **Sin terminal:** en github.com entra en `data/`, botón **Add file → Upload files**, arrastra el Excel y **Commit changes**.
-   - **Con terminal:** `git add data/ && git commit -m "update" && git push`
-3. GitHub Actions se dispara solo. En ~1 minuto el dashboard está actualizado con sello de fecha/hora.
+## Operaciones que aún no están en el export
 
-El script recalcula PnL neto y rentabilidad desde las columnas base (PnL Bruto + Comisiones + Funding), así que da igual con qué programa edites el Excel — no depende de que las fórmulas estén recalculadas.
+Si cierras operaciones después de tu último export y quieres verlas ya en el dashboard, añádelas como filas en `data/operaciones-manuales.csv`:
 
-Columnas que el script necesita en la hoja "Operaciones": `Fecha Cierre`, `Símbolo`, `Lado`, `Tipo`, `Promedios`, `Capital Desplegado ($)`, `PnL Bruto ($)`, `Comisiones ($)`, `Funding ($)`, `Resultado`. Puedes añadir columnas extra sin romper nada.
+```
+symbol,side,open_time,close_time,pnl,fee,funding,capital,promedios,liquidada
+EVAA,short,2026-07-09 12:05:44,2026-07-09 12:44:09,200.32,0,0,1000,0,no
+```
 
-## Nota de privacidad
-
-GitHub Pages publica el HTML en una URL **pública** aunque el repo sea privado. La URL no está indexada ni es adivinable fácilmente, pero cualquiera con el enlace ve los datos. Si quieres el dashboard protegido con contraseña, la alternativa es desplegar `dist/` en Netlify (que ya usáis) y activar **Site protection → Password**: basta con cambiar el último paso del workflow por `netlify deploy --prod --dir=dist` con los secrets `NETLIFY_AUTH_TOKEN` y `NETLIFY_SITE_ID`.
+Cuando reexportes los CSV y ya incluyan esas operaciones, el script las deduplica solo (mismo símbolo y cierre a menos de 2 minutos) — no hace falta borrarlas del CSV manual.
 
 ## Probar en local
 
