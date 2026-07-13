@@ -69,7 +69,7 @@ th.num{text-align:right}
   <h1>Dashboard de Operativa</h1>
   <div class="sub" id="range">—</div>
   <a href="operativa-futuros-pionex.xlsx" class="btn" style="display:inline-block;text-decoration:none;margin-bottom:24px">Descargar Excel</a>
-  <div class="sub" style="margin-top:-22px;font-family:'Geist Mono',monospace;font-size:11px">Última actualización: __UPDATED__ UTC</div>
+  <div class="sub" style="margin-top:-22px;font-family:'Geist Mono',monospace;font-size:11px"><span id="srcStatus">Cargando datos de Google Sheets…</span> · <a href="#" id="refreshBtn" style="color:var(--persimon);text-decoration:none">Actualizar ↻</a></div>
 
   <div class="kpis">
     <div class="kpi"><div class="lbl">% medio de ganancia por operación</div><div class="val" id="kAvgPct">—</div><div class="sub2">PnL neto / capital desplegado</div></div>
@@ -193,7 +193,72 @@ function drawDays(days){
 }
 
 
-render();
+const SHEET_ID = '1GX0loyM0pblHs_vOO9hBjb4ivTf_hu3wRW0xJ0FQndY';
+const SHEET_CSV = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/gviz/tq?tqx=out:csv&sheet=Operaciones';
+
+function parseCSV(text){
+  const rows=[]; let row=[], field='', q=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(q){
+      if(c==='"'){ if(text[i+1]==='"'){field+='"';i++;} else q=false; }
+      else field+=c;
+    } else {
+      if(c==='"') q=true;
+      else if(c===','){ row.push(field); field=''; }
+      else if(c==='\n'){ row.push(field); rows.push(row); row=[]; field=''; }
+      else if(c!=='\r') field+=c;
+    }
+  }
+  if(field!==''||row.length){ row.push(field); rows.push(row); }
+  return rows;
+}
+function num(v){
+  if(v===null||v===undefined) return 0;
+  v=String(v).trim(); if(!v) return 0;
+  if(v.includes(',') && v.includes('.')) v = v.replace(/\./g,'').replace(',','.');
+  else if(v.includes(',')) v = v.replace(',','.');
+  const n=parseFloat(v); return isNaN(n)?0:n;
+}
+function normDate(v){
+  v=String(v).trim();
+  let m=v.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})/);
+  if(m) return m[1]+'-'+m[2]+'-'+m[3]+' '+m[4].padStart(2,'0')+':'+m[5];
+  m=v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})[ T]?(\d{1,2})?:?(\d{2})?/);
+  if(m) return m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0')+' '+(m[4]||'0').padStart(2,'0')+':'+(m[5]||'00');
+  return v.slice(0,16);
+}
+async function loadFromSheet(){
+  const st=document.getElementById('srcStatus');
+  try{
+    const resp=await fetch(SHEET_CSV,{cache:'no-store'});
+    if(!resp.ok) throw new Error('HTTP '+resp.status);
+    const rows=parseCSV(await resp.text());
+    const head=rows[0].map(h=>h.trim());
+    const ix=n=>head.indexOf(n);
+    const iF=ix('Fecha Cierre'), iS=ix('Símbolo'), iP=ix('Promedios'),
+          iC=ix('Capital Desplegado ($)'), iN=ix('PnL ($)'), iR=ix('Resultado');
+    if(iF<0||iS<0||iN<0) throw new Error('cabeceras no encontradas');
+    const ops=rows.slice(1).filter(r=>r[iS]&&r[iS].trim()).map(r=>{
+      const c=num(r[iC]);
+      const n=num(r[iN]);
+      return {d:normDate(r[iF]), s:r[iS].trim(), l:'Short', t:'Manual',
+        p:Math.round(num(r[iP])), c:+c.toFixed(2),
+        n:+n.toFixed(2), r:(c>0? +(n/c*100).toFixed(2):null), res:(r[iR]||'').trim()};
+    });
+    if(!ops.length) throw new Error('sin operaciones');
+    OPS=ops; render();
+    st.textContent='Datos en vivo de Google Sheets · '+new Date().toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
+    st.style.color='#3DDC97';
+  }catch(err){
+    OPS=EMBEDDED; render();
+    st.textContent='Sin conexión con Google Sheets (mostrando última copia) — comprueba que el Sheet esté compartido con enlace';
+    st.style.color='#FF4D6D';
+  }
+}
+document.getElementById('refreshBtn').addEventListener('click',e=>{e.preventDefault();loadFromSheet();});
+render();          // pinta el snapshot embebido al instante
+loadFromSheet();   // y refresca con datos en vivo
 </script>
 </body>
 </html>
